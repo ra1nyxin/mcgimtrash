@@ -20,15 +20,40 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Set up Java 25
+      - name: Set up Java 25 build toolchain
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
           cache: maven
 
-      - name: Build with Maven
-        run: mvn --batch-mode --no-transfer-progress clean package
+      - name: Build Java 21 bytecode
+        shell: bash
+        run: |
+          mvn --batch-mode --no-transfer-progress \
+            -Dmaven.compiler.release=21 clean package
+          mkdir -p dist
+          source_jar="$(find target -maxdepth 1 -type f -name 'mcgimtrash-*.jar' -print -quit)"
+          test -n "$source_jar"
+          asset="dist/$(basename "$source_jar" .jar)-jdk21.jar"
+          mv "$source_jar" "$asset"
+          major="$(javap -verbose -classpath "$asset" mcgimtrash.McGimTrash \
+            | awk '/major version/ {print $3}')"
+          test "$major" = "65"
+
+      - name: Build Java 25 bytecode
+        shell: bash
+        run: |
+          mvn --batch-mode --no-transfer-progress \
+            -Dmaven.compiler.release=25 clean package
+          source_jar="$(find target -maxdepth 1 -type f -name 'mcgimtrash-*.jar' -print -quit)"
+          test -n "$source_jar"
+          asset="dist/$(basename "$source_jar" .jar)-jdk25.jar"
+          mv "$source_jar" "$asset"
+          major="$(javap -verbose -classpath "$asset" mcgimtrash.McGimTrash \
+            | awk '/major version/ {print $3}')"
+          test "$major" = "69"
+          sha256sum dist/*.jar
 
       - name: Generate random release values
         id: release
@@ -36,20 +61,16 @@ jobs:
         run: |
           tag="build-$(cat /proc/sys/kernel/random/uuid)"
           title="release-$(cat /proc/sys/kernel/random/uuid)"
-          jar_path="$(find target -maxdepth 1 -type f -name 'mcgimtrash-*.jar' -print -quit)"
-          test -n "$jar_path"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "title=$title" >> "$GITHUB_OUTPUT"
-          echo "jar_path=$jar_path" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_TITLE: ${{ steps.release.outputs.title }}
-          RELEASE_JAR: ${{ steps.release.outputs.jar_path }}
         run: |
-          gh release create "$RELEASE_TAG" "$RELEASE_JAR" \
+          gh release create "$RELEASE_TAG" dist/*.jar \
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TITLE" \
-            --notes "由 GitHub Actions 从提交 $GITHUB_SHA 自动构建。"
+            --notes "由 GitHub Actions 从提交 $GITHUB_SHA 自动构建。Release 同时提供 Java 21 和 Java 25 字节码版本。"

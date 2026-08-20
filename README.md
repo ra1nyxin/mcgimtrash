@@ -15,7 +15,9 @@ mcgimtrash 是一个面向 Paper 26.2 的地面掉落物管理插件。它定期
 
 ## 安装
 
-1. 从仓库的 Releases 页面下载最新发布中的 `mcgimtrash-*.jar`。
+1. 从仓库的 Releases 页面按运行环境选择下载：
+   - `mcgimtrash-*-jdk25.jar`：标准 Paper/Purpur 26.2 环境，推荐选择；
+   - `mcgimtrash-*-jdk21.jar`：仅用于服务端实现本身可在 Java 21 启动，并且提供本插件所需 Paper 26.2 API 的兼容环境。
 2. 将 JAR 放入服务端的 `plugins` 目录。
 3. 重启服务端。
 
@@ -25,7 +27,7 @@ mcgimtrash 是一个面向 Paper 26.2 的地面掉落物管理插件。它定期
 
 ## 兼容性
 
-当前代码基于 Paper API `26.2.build.87-stable` 编译，字节码目标为 Java 25。
+当前代码基于 Paper API `26.2.build.87-stable` 编译。Release 同时提供 Java 21（class major 65）和 Java 25（class major 69）字节码版本。
 
 | 环境 | 兼容情况 |
 | --- | --- |
@@ -43,21 +45,27 @@ mcgimtrash 是一个面向 Paper 26.2 的地面掉落物管理插件。它定期
 - `ItemStack.serializeItemsAsBytes()` 和 `ItemStack.deserializeItemsFromBytes()`；
 - 接受 Adventure `Component` 的 GUI 标题、物品名称和 lore 接口。
 
-服务端必须使用 Java 25 或更高版本。Paper 的原生物品序列化数据通常可以随服务端升级，但不保证能够降级读取；已经在新版本服务端保存过的状态文件不应直接交给更旧的服务端使用。
+标准 Paper 26.2 API 自身使用 Java 25 字节码，因此常规 Paper/Purpur 26.2 服务端仍需要 Java 25，应该下载 `jdk25` 资产。`jdk21` 资产确实使用 Java 21 字节码，但它不会让原本要求 Java 25 的服务端改为支持 Java 21；它只为能够在 Java 21 启动、同时兼容所需 Paper 26.2 API 的下游实现保留。Java 25 JVM 也可以加载 `jdk21` 资产，但常规环境建议下载与服务端 Java 主版本一致的构建。
+
+Paper 的原生物品序列化数据通常可以随服务端升级，但不保证能够降级读取；已经在新版本服务端保存过的状态文件不应直接交给更旧的服务端使用。
 
 ## 构建
 
-需要 Java 25 和 Maven：
+由于 Paper 26.2 API 本身使用 Java 25 字节码，两种目标版本都使用 JDK 25 编译器构建。Maven 的 `release` 参数决定最终插件字节码版本：
 
 ```bash
-mvn --batch-mode --no-transfer-progress clean package
+# Java 21 字节码（class major 65）
+mvn --batch-mode --no-transfer-progress -Dmaven.compiler.release=21 clean package
+
+# Java 25 字节码（class major 69）
+mvn --batch-mode --no-transfer-progress -Dmaven.compiler.release=25 clean package
 ```
 
-构建结果位于 `target/mcgimtrash-1.0.0.jar`。
+每条命令的构建结果均位于 `target/mcgimtrash-1.0.0.jar`。GitHub Actions 会分别重命名为带有 `jdk21` 和 `jdk25` 后缀的 Release 资产。
 
 ## 自动发布
 
-推送到 `main` 分支或手动运行 GitHub Actions 工作流时，仓库会自动执行 Maven 构建并创建 GitHub Release。每次发布的 tag 和 Release 标题都由独立的随机 UUID 生成，不使用需要人工维护的语义化版本号；构建出的 JAR 会作为 Release 资产上传。
+推送到 `main` 分支或手动运行 GitHub Actions 工作流时，仓库会自动构建 Java 21 和 Java 25 两种字节码版本，并验证主类的 class major 分别为 65 和 69。随后工作流会创建 GitHub Release，并将两个 JAR 作为独立资产上传。每次发布的 tag 和 Release 标题都由独立的随机 UUID 生成，不使用需要人工维护的语义化版本号。
 
 ## 许可证
 
