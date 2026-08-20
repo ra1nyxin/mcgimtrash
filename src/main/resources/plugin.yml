@@ -6,5 +6,9 @@ api-version: '26.2'
 description: Periodically sweeps ground items into a shared virtual trash bin.
 commands:
   mcgimtrash:
-    description: Opens the shared ground-item trash bin.
-    usage: /mcgimtrash
+    description: Opens the shared trash bin or reloads the plugin configuration.
+    usage: /mcgimtrash [reload]
+permissions:
+  mcgimtrash.admin:
+    description: Allows reloading the mcgimtrash configuration.
+    default: op

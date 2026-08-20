@@ -9,6 +9,9 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.PluginCommand;
+import org.bukkit.command.TabCompleter;
+import org.bukkit.configuration.InvalidConfigurationException;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -23,22 +26,17 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.Locale;
 import java.util.logging.Level;
 
-public final class McGimTrash extends JavaPlugin implements Listener, CommandExecutor {
-    static final int SWEEPS_PER_CYCLE = 10;
-
-    private static final long SWEEP_INTERVAL_MILLIS = 30L * 60L * 1000L;
+public final class McGimTrash extends JavaPlugin
+        implements Listener, CommandExecutor, TabCompleter {
     private static final long STORAGE_RETRY_MILLIS = 30L * 1000L;
-    private static final Reminder[] REMINDERS = {
-            new Reminder(10L * 1000L, 1 << 3, "10 秒"),
-            new Reminder(30L * 1000L, 1 << 2, "30 秒"),
-            new Reminder(60L * 1000L, 1 << 1, "60 秒"),
-            new Reminder(5L * 60L * 1000L, 1, "5 分钟")
-    };
 
     private TrashBin trashBin;
     private StateStore stateStore;
+    private PluginSettings settings;
     private BukkitTask clockTask;
     private BukkitTask queuedSaveTask;
     private int completedSweeps;
@@ -53,6 +51,16 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
 
     @Override
     public void onEnable() {
+        saveDefaultConfig();
+        try {
+            settings = readSettingsFile();
+        } catch (IOException | InvalidConfigurationException | RuntimeException exception) {
+            getLogger().log(Level.SEVERE,
+                    "Configuration is invalid; disabling mcgimtrash.", exception);
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
         trashBin = new TrashBin(this);
         stateStore = new StateStore(getDataFolder().toPath());
 
@@ -62,7 +70,7 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
             long now = System.currentTimeMillis();
             if (loadResult == null) {
                 completedSweeps = 0;
-                nextSweepAt = now + SWEEP_INTERVAL_MILLIS;
+                nextSweepAt = now + settings.sweepIntervalMillis();
                 warningMask = 0;
                 shouldRewriteState = true;
             } else {
@@ -76,8 +84,9 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
                     preserveBackupOnNextSave = true;
                     shouldRewriteState = true;
                 }
-                if (nextSweepAt <= 0 || nextSweepAt > now + SWEEP_INTERVAL_MILLIS) {
-                    nextSweepAt = now + SWEEP_INTERVAL_MILLIS;
+                if (nextSweepAt <= 0
+                        || nextSweepAt > now + settings.sweepIntervalMillis()) {
+                    nextSweepAt = now + settings.sweepIntervalMillis();
                     warningMask = 0;
                     shouldRewriteState = true;
                 }
@@ -97,6 +106,7 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
             return;
         }
         command.setExecutor(this);
+        command.setTabCompleter(this);
 
         initialized = true;
         if (shouldRewriteState) {
@@ -127,8 +137,22 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
+            if (!sender.hasPermission("mcgimtrash.admin")) {
+                sender.sendMessage(Component.text("你没有权限重载 mcgimtrash。",
+                        NamedTextColor.RED));
+                return true;
+            }
+            reloadPluginSettings(sender);
+            return true;
+        }
+        if (args.length != 0) {
+            sender.sendMessage(Component.text("用法：/" + label + " [reload]",
+                    NamedTextColor.RED));
+            return true;
+        }
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("This command can only be used by a player.");
+            sender.sendMessage("控制台请使用 /mcgimtrash reload。");
             return true;
         }
         if (!storageAvailable) {
@@ -137,6 +161,16 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
         }
         trashBin.openPage(player, 0);
         return true;
+    }
+
+    @Override
+    public List<String> onTabComplete(
+            CommandSender sender, Command command, String alias, String[] args) {
+        if (args.length == 1 && sender.hasPermission("mcgimtrash.admin")
+                && "reload".startsWith(args[0].toLowerCase(Locale.ROOT))) {
+            return List.of("reload");
+        }
+        return List.of();
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -232,8 +266,8 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
 
     private void sendDueReminder(long now) {
         long remaining = nextSweepAt - now;
-        Reminder due = null;
-        for (Reminder reminder : REMINDERS) {
+        PluginSettings.Reminder due = null;
+        for (PluginSettings.Reminder reminder : settings.reminders()) {
             if (remaining <= reminder.leadTimeMillis()
                     && (warningMask & reminder.mask()) == 0) {
                 due = reminder;
@@ -244,17 +278,17 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
             return;
         }
 
-        for (Reminder reminder : REMINDERS) {
+        for (PluginSettings.Reminder reminder : settings.reminders()) {
             if (reminder.leadTimeMillis() >= due.leadTimeMillis()) {
                 warningMask |= reminder.mask();
             }
         }
         dirty = true;
         saveNow();
-        Component message = Component.text("[GIM] ", NamedTextColor.DARK_AQUA)
+        Component message = messagePrefix()
                 .append(Component.text("距离清理地面掉落物还有 " + due.label() + "。",
                         NamedTextColor.AQUA));
-        if (completedSweeps >= SWEEPS_PER_CYCLE) {
+        if (completedSweeps >= settings.sweepsPerCycle()) {
             message = message.append(Component.text(
                     " 本次清扫将开启新周期并清空旧垃圾桶。", NamedTextColor.YELLOW));
         }
@@ -262,7 +296,7 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
     }
 
     private void performSweep(long now) {
-        boolean startedNewCycle = completedSweeps >= SWEEPS_PER_CYCLE;
+        boolean startedNewCycle = completedSweeps >= settings.sweepsPerCycle();
         long purgedItems = 0L;
         if (startedNewCycle) {
             purgedItems = trashBin.clearContents();
@@ -271,7 +305,7 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
 
         SweepResult result = trashBin.sweepLoadedItems();
         completedSweeps++;
-        nextSweepAt = now + SWEEP_INTERVAL_MILLIS;
+        nextSweepAt = now + settings.sweepIntervalMillis();
         warningMask = 0;
         dirty = true;
         saveNow();
@@ -280,7 +314,7 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
 
     private void broadcastSweepResult(
             SweepResult result, boolean startedNewCycle, long purgedItems) {
-        Component message = Component.text("[GIM] ", NamedTextColor.DARK_AQUA)
+        Component message = messagePrefix()
                 .append(Component.text("已清理 " + result.collectedItems()
                         + " 件地面掉落物。", NamedTextColor.AQUA));
         if (startedNewCycle) {
@@ -320,6 +354,48 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
         });
     }
 
+    private void reloadPluginSettings(CommandSender sender) {
+        PluginSettings reloaded;
+        try {
+            reloaded = readSettingsFile();
+        } catch (IOException | InvalidConfigurationException | RuntimeException exception) {
+            getLogger().log(Level.WARNING,
+                    "Cannot reload invalid mcgimtrash configuration.", exception);
+            sender.sendMessage(Component.text(
+                    "配置重载失败，插件继续使用原有设置；请检查控制台日志。",
+                    NamedTextColor.RED));
+            return;
+        }
+
+        settings = reloaded;
+        long now = System.currentTimeMillis();
+        long latestAllowedSweep = now + settings.sweepIntervalMillis();
+        if (nextSweepAt > latestAllowedSweep) {
+            nextSweepAt = latestAllowedSweep;
+        }
+        warningMask = 0;
+        dirty = true;
+        boolean persisted = saveNow();
+
+        Component result = Component.text("mcgimtrash 配置已重载。", NamedTextColor.GREEN);
+        if (!persisted) {
+            result = result.append(Component.text(
+                    " 状态存储仍不可用，清扫和垃圾桶已暂停。", NamedTextColor.RED));
+        }
+        sender.sendMessage(result);
+    }
+
+    private PluginSettings readSettingsFile()
+            throws IOException, InvalidConfigurationException {
+        YamlConfiguration candidate = new YamlConfiguration();
+        candidate.load(getDataFolder().toPath().resolve("config.yml").toFile());
+        return PluginSettings.from(candidate);
+    }
+
+    private Component messagePrefix() {
+        return Component.text(settings.messagePrefix() + " ", NamedTextColor.DARK_AQUA);
+    }
+
     private boolean saveNow() {
         if (stateStore == null || trashBin == null) {
             return false;
@@ -345,8 +421,5 @@ public final class McGimTrash extends JavaPlugin implements Listener, CommandExe
                     "Cannot persist trash state; sweeping and GUI access are paused.", exception);
             return false;
         }
-    }
-
-    private record Reminder(long leadTimeMillis, int mask, String label) {
     }
 }

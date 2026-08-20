@@ -20,6 +20,7 @@ final class StateStore {
     private static final int MAGIC = 0x4D47494D;
     private static final int FORMAT_VERSION = 1;
     private static final int MAX_FILE_SIZE = 64 * 1024 * 1024;
+    private static final int MAX_STORED_COMPLETED_SWEEPS = 1_000_000;
     private static final int CHECKSUM_BYTES = Long.BYTES;
 
     private final Path stateFile;
@@ -101,7 +102,7 @@ final class StateStore {
             long nextSweepAt = input.readLong();
             int warningMask = input.readInt();
             int itemDataLength = input.readInt();
-            if (completedSweeps < 0 || completedSweeps > McGimTrash.SWEEPS_PER_CYCLE) {
+            if (completedSweeps < 0 || completedSweeps > MAX_STORED_COMPLETED_SWEEPS) {
                 throw new IOException("Invalid completed sweep count: " + completedSweeps);
             }
             if (itemDataLength <= 0 || itemDataLength > MAX_FILE_SIZE) {

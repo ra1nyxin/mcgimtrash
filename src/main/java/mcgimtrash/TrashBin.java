@@ -37,7 +37,7 @@ final class TrashBin {
         for (int page = 0; page < PAGE_COUNT; page++) {
             TrashPageHolder holder = new TrashPageHolder(this, page);
             Component title = Component.text("垃圾桶 " + (page + 1) + "/" + PAGE_COUNT,
-                    NamedTextColor.DARK_GREEN);
+                    NamedTextColor.DARK_GRAY);
             Inventory inventory = plugin.getServer().createInventory(holder, PAGE_SIZE, title);
             holder.bind(inventory);
             pages[page] = inventory;
