@@ -219,7 +219,7 @@ final class TrashBin {
     }
 
     private ItemStack navigationButton(String name, int direction, String lore) {
-        ItemStack button = ItemStack.of(Material.ARROW);
+        ItemStack button = ItemStack.of(Material.WHITE_STAINED_GLASS_PANE);
         button.editMeta(meta -> {
             meta.displayName(Component.text(name, NamedTextColor.YELLOW));
             meta.lore(List.of(Component.text(lore, NamedTextColor.GRAY)));
