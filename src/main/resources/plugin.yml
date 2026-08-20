@@ -1,0 +1,10 @@
+name: mcgimtrash
+version: 1.0.0
+main: mcgimtrash.McGimTrash
+author: ra1nyxin
+api-version: '26.2'
+description: Periodically sweeps ground items into a shared virtual trash bin.
+commands:
+  mcgimtrash:
+    description: Opens the shared ground-item trash bin.
+    usage: /mcgimtrash
